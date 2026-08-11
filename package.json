@@ -1,0 +1,9 @@
+{
+  "name": "hornsby-leadership-todo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hornsby BMW leadership team traffic-light to-do list",
+  "dependencies": {
+    "@vercel/kv": "^1.0.1"
+  }
+}

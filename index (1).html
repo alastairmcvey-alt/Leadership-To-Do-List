@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leadership To-Do List</title>
+<style>
+  :root{
+    --bg:#14161a; --panel:#1d2027; --panel2:#242832; --border:#323744;
+    --text:#f4f5f7; --muted:#9096a3;
+    --red:#e5484d; --red-bg:#3a1f21; --red-text:#ff8a8f;
+    --orange:#ff9f43; --orange-bg:#3a2a17; --orange-text:#ffb66b;
+    --green:#2fbf71; --green-bg:#16302a; --green-text:#6fe3a6;
+    --accent:#5b8cff;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  header{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--border);
+    padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:-0.2px;}
+  header .sub{color:var(--muted);font-size:12.5px;margin-top:2px;}
+  .btn{border:none;border-radius:9px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;
+    transition:transform .08s ease, opacity .15s ease;}
+  .btn:active{transform:scale(0.97);}
+  .btn-primary{background:var(--accent);color:white;}
+  .btn-ghost{background:var(--panel2);color:var(--text);border:1px solid var(--border);}
+  main{max-width:900px;margin:0 auto;padding:18px 16px 80px;}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;background:var(--panel2);padding:4px;border-radius:11px;
+    border:1px solid var(--border);width:fit-content;}
+  .tab{padding:8px 16px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;}
+  .tab.active{background:var(--panel);color:var(--text);}
+  .tab .count{opacity:.7;font-weight:500;}
+  .lane-header{display:flex;align-items:center;gap:8px;margin:22px 0 10px;font-size:12.5px;
+    font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .dot.red{background:var(--red);} .dot.orange{background:var(--orange);} .dot.green{background:var(--green);}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;
+    margin-bottom:10px;border-left:4px solid var(--border);}
+  .card.red{border-left-color:var(--red);}
+  .card.orange{border-left-color:var(--orange);}
+  .card.green{border-left-color:var(--green);opacity:.75;}
+  .card-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
+  .card h3{margin:0;font-size:15px;font-weight:650;line-height:1.35;}
+  .card p.desc{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.5;}
+  .badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;white-space:nowrap;}
+  .badge.low{background:#242832;color:var(--muted);}
+  .badge.medium{background:#1c2b3f;color:#7fb0ff;}
+  .badge.high{background:var(--orange-bg);color:var(--orange-text);}
+  .badge.urgent{background:var(--red-bg);color:var(--red-text);}
+  .meta{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:12px;color:var(--muted);}
+  .meta b{color:var(--text);font-weight:600;}
+  .stuck{color:var(--red-text) !important;font-weight:700;}
+  .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+  .actions button{font-size:12.5px;padding:7px 12px;border-radius:7px;border:1px solid var(--border);
+    background:var(--panel2);color:var(--text);cursor:pointer;font-weight:600;}
+  .actions button.primary{background:var(--accent);border-color:var(--accent);}
+  .actions button.complete{background:var(--green-bg);border-color:var(--green);color:var(--green-text);}
+  .empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:14px;}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;
+    justify-content:center;z-index:50;}
+  @media(min-width:640px){.overlay{align-items:center;}}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:16px 16px 0 0;
+    width:100%;max-width:480px;padding:20px;max-height:90vh;overflow-y:auto;}
+  @media(min-width:640px){.modal{border-radius:16px;}}
+  .modal h2{margin:0 0 14px;font-size:17px;}
+  label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:12px 0 6px;}
+  input[type=text],textarea,select{width:100%;background:var(--panel2);border:1px solid var(--border);
+    color:var(--text);border-radius:9px;padding:10px 12px;font-size:14px;font-family:inherit;}
+  textarea{min-height:64px;resize:vertical;}
+  .modal-actions{display:flex;gap:10px;margin-top:18px;}
+  .modal-actions button{flex:1;padding:11px;border-radius:9px;font-size:14px;font-weight:600;border:none;cursor:pointer;}
+  .cancel{background:var(--panel2);color:var(--text);border:1px solid var(--border) !important;}
+  .confirm-box{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:12px;font-size:13px;color:var(--muted);}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);
+    border:1px solid var(--border);padding:10px 18px;border-radius:10px;font-size:13px;z-index:60;opacity:0;
+    transition:opacity .25s ease;pointer-events:none;}
+  .toast.show{opacity:1;}
+  .loading{text-align:center;color:var(--muted);padding:60px 20px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Leadership To-Do List</h1>
+    <div class="sub" id="subtext">Loading…</div>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-ghost" onclick="loadTasks(true)">Refresh</button>
+    <button class="btn btn-primary" onclick="openAddModal()">+ Add task</button>
+  </div>
+</header>
+
+<main>
+  <div class="tabs">
+    <div class="tab active" data-tab="active" onclick="setTab('active')">Active <span class="count" id="countActive"></span></div>
+    <div class="tab" data-tab="history" onclick="setTab('history')">Completed <span class="count" id="countHistory"></span></div>
+  </div>
+  <div id="content" class="loading">Loading tasks…</div>
+</main>
+
+<div class="overlay" id="addOverlay" style="display:none;">
+  <div class="modal">
+    <h2>Add a task</h2>
+    <label>Task</label>
+    <input type="text" id="f-title" placeholder="e.g. Order brake pad stock for next week">
+    <label>Description / notes (optional)</label>
+    <textarea id="f-desc" placeholder="Any extra detail"></textarea>
+    <label>Your name</label>
+    <select id="f-name"></select>
+    <label>Urgency</label>
+    <select id="f-urgency">
+      <option>Low</option><option selected>Medium</option><option>High</option><option>Urgent</option>
+    </select>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal('addOverlay')">Cancel</button>
+      <button class="btn-primary" style="background:var(--accent);color:#fff;" onclick="submitTask()">Add task</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="completeOverlay" style="display:none;">
+  <div class="modal">
+    <h2>Mark as complete</h2>
+    <div class="confirm-box">There's no login on this list, so completion runs on trust. Only confirm if this is genuinely finished — the task will move to the Completed tab.</div>
+    <label>Confirming as</label>
+    <select id="c-name"></select>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal('completeOverlay')">Cancel</button>
+      <button class="complete" style="background:var(--green);color:#0d2318;" onclick="confirmComplete()">Yes, mark complete</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TEAM = ["Alastair McVey","Matt Gale","Nelson Amath","Mohammad Dubdub","Jack Duncum","Clyde Nolan","Jono Power"];
+const STORAGE_KEY = "hornsby-leadership-tasks";
+let tasks = [];
+let currentTab = "active";
+let pendingCompleteId = null;
+
+function fillNameSelects(){
+  ["f-name","c-name"].forEach(id=>{
+    const sel = document.getElementById(id);
+    sel.innerHTML = TEAM.map(n=>`<option value="${n}">${n}</option>`).join("");
+  });
+}
+fillNameSelects();
+
+function showToast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 2200);
+}
+
+function setStatus(msg, isError){
+  const el = document.getElementById("subtext");
+  el.textContent = msg;
+  el.style.color = isError ? "var(--red-text)" : "var(--muted)";
+}
+
+// The storage layer talks to our own /api/tasks endpoint (backed by
+// Vercel KV), not Claude's artifact storage — this runs as a normal
+// website, so no sign-in of any kind is required.
+async function loadTasks(manual, attempt){
+  attempt = attempt || 1;
+  setStatus(manual ? "Refreshing…" : "Connecting…", false);
+  try{
+    const res = await fetch("/api/tasks", {cache:"no-store"});
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      throw new Error(body.error || ("HTTP " + res.status));
+    }
+    const data = await res.json();
+    tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    setStatus("Shared with the whole leadership team — tap Refresh to see others' changes", false);
+    render();
+    if(manual) showToast("Refreshed — " + tasks.length + " task" + (tasks.length===1?"":"s") + " loaded");
+  }catch(e){
+    if(attempt < 3){
+      setTimeout(()=>loadTasks(manual, attempt+1), 600);
+      return;
+    }
+    const hint = (e.message && e.message.includes("KV")) ? " — storage isn't connected yet, ask Alastair to check Vercel" : "";
+    setStatus("Couldn't connect to shared storage" + hint, true);
+    if(manual) showToast("Refresh failed — check your connection");
+  }
+}
+
+async function saveTasksRaw(list){
+  try{
+    const res = await fetch("/api/tasks", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tasks: list})
+    });
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      setStatus("Save failed — your change may not be visible to the team. Try again.", true);
+      showToast(body.error || "Save failed — please try again");
+      return false;
+    }
+    setStatus("Shared with the whole leadership team — tap Refresh to see others' changes", false);
+    return true;
+  }catch(e){
+    setStatus("Save failed — your change may not be visible to the team. Try again.", true);
+    showToast("Couldn't save — check your connection and try again");
+    return false;
+  }
+}
+
+function daysBetween(a,b){
+  const MS = 1000*60*60*24;
+  return Math.max(0, Math.floor((b - a) / MS));
+}
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function fmt(iso){
+  if(!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-AU",{day:"2-digit",month:"short",year:"numeric"});
+}
+
+function setTab(tab){
+  currentTab = tab;
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active", t.dataset.tab===tab));
+  render();
+}
+
+function render(){
+  const active = tasks.filter(t=>t.status!=="Complete");
+  const history = tasks.filter(t=>t.status==="Complete");
+  document.getElementById("countActive").textContent = active.length ? `(${active.length})` : "";
+  document.getElementById("countHistory").textContent = history.length ? `(${history.length})` : "";
+
+  const content = document.getElementById("content");
+  content.classList.remove("loading");
+
+  if(currentTab === "active"){
+    if(active.length === 0){
+      content.innerHTML = `<div class="empty">No active tasks. Tap "+ Add task" to create one.</div>`;
+      return;
+    }
+    const red = active.filter(t=>t.status==="To Start");
+    const orange = active.filter(t=>t.status==="In Progress");
+    content.innerHTML =
+      laneHTML("red","To start", red) +
+      laneHTML("orange","In progress", orange);
+  } else {
+    if(history.length === 0){
+      content.innerHTML = `<div class="empty">Nothing completed yet.</div>`;
+      return;
+    }
+    const sorted = [...history].sort((a,b)=> new Date(b.completedDate) - new Date(a.completedDate));
+    content.innerHTML = laneHTML("green","Completed", sorted);
+  }
+}
+
+function laneHTML(color,label,list){
+  if(list.length===0) return "";
+  return `<div class="lane-header"><span class="dot ${color}"></span>${label} — ${list.length}</div>` +
+    list.map(t=>cardHTML(t,color)).join("");
+}
+
+function cardHTML(t,color){
+  const urgencyClass = t.urgency.toLowerCase();
+  let daysInfo = "";
+  if(t.status === "In Progress"){
+    const d = daysBetween(new Date(t.progressStartDate), new Date());
+    const stuck = d > 5 ? "stuck" : "";
+    daysInfo = `<span class="${stuck}">${d} day${d===1?"":"s"} in progress</span>`;
+  } else if(t.status === "Complete"){
+    const d = daysBetween(new Date(t.progressStartDate || t.startDate), new Date(t.completedDate));
+    daysInfo = `<span>${d} day${d===1?"":"s"} to complete</span>`;
+  } else {
+    const d = daysBetween(new Date(t.startDate), new Date());
+    daysInfo = `<span>${d} day${d===1?"":"s"} since added</span>`;
+  }
+
+  let actions = "";
+  if(t.status === "To Start"){
+    actions = `<div class="actions">
+      <button class="primary" style="background:var(--orange);border-color:var(--orange);color:#3a1f00;" onclick="startTask('${t.id}')">Start progress</button>
+    </div>`;
+  } else if(t.status === "In Progress"){
+    actions = `<div class="actions">
+      <button onclick="revertTask('${t.id}')">Back to To Start</button>
+      <button class="complete" onclick="openCompleteModal('${t.id}')">Mark complete</button>
+    </div>`;
+  }
+
+  return `<div class="card ${color}">
+    <div class="card-top">
+      <h3>${escapeHTML(t.title)}</h3>
+      <span class="badge ${urgencyClass}">${t.urgency}</span>
+    </div>
+    ${t.description ? `<p class="desc">${escapeHTML(t.description)}</p>` : ""}
+    <div class="meta">
+      <span>Added by <b>${t.addedBy}</b></span>
+      <span>Start <b>${fmt(t.startDate)}</b></span>
+      ${daysInfo}
+      ${t.status==="Complete" ? `<span>Confirmed by <b>${t.approvedBy}</b></span>` : ""}
+    </div>
+    ${actions}
+  </div>`;
+}
+
+function escapeHTML(s){
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function openAddModal(){
+  document.getElementById("f-title").value = "";
+  document.getElementById("f-desc").value = "";
+  document.getElementById("f-urgency").value = "Medium";
+  document.getElementById("addOverlay").style.display = "flex";
+}
+function closeModal(id){ document.getElementById(id).style.display = "none"; }
+
+// Pulls the latest saved list first, applies the change, then saves —
+// so this device can't accidentally overwrite a task a teammate added
+// or updated moments earlier. Falls back to the in-memory list only
+// if the fresh fetch itself fails.
+async function withFreshTasks(mutate){
+  let freshTasks = tasks;
+  try{
+    const res = await fetch("/api/tasks", {cache:"no-store"});
+    if(res.ok){
+      const data = await res.json();
+      freshTasks = Array.isArray(data.tasks) ? data.tasks : [];
+    }
+  }catch(e){
+    // couldn't reach storage at all — fall back to what we already have locally
+  }
+  mutate(freshTasks);
+  tasks = freshTasks;
+  return await saveTasksRaw(tasks);
+}
+
+async function submitTask(){
+  const title = document.getElementById("f-title").value.trim();
+  if(!title){ showToast("Give the task a title first"); return; }
+  const task = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+    title,
+    description: document.getElementById("f-desc").value.trim(),
+    addedBy: document.getElementById("f-name").value,
+    urgency: document.getElementById("f-urgency").value,
+    status: "To Start",
+    startDate: todayISO(),
+    progressStartDate: null,
+    completedDate: null,
+    approvedBy: null
+  };
+  const ok = await withFreshTasks(list => list.unshift(task));
+  render();
+  if(ok){
+    closeModal("addOverlay");
+    showToast("Task added");
+  } else {
+    showToast("Couldn't add the task — check your connection and try again");
+  }
+}
+
+async function startTask(id){
+  const ok = await withFreshTasks(list => {
+    const t = list.find(x=>x.id===id);
+    if(t){ t.status = "In Progress"; t.progressStartDate = todayISO(); }
+  });
+  render();
+  if(!ok) showToast("Couldn't save that change — please try again");
+}
+
+async function revertTask(id){
+  const ok = await withFreshTasks(list => {
+    const t = list.find(x=>x.id===id);
+    if(t){ t.status = "To Start"; t.progressStartDate = null; }
+  });
+  render();
+  if(!ok) showToast("Couldn't save that change — please try again");
+}
+
+function openCompleteModal(id){
+  pendingCompleteId = id;
+  document.getElementById("completeOverlay").style.display = "flex";
+}
+
+async function confirmComplete(){
+  const approvedBy = document.getElementById("c-name").value;
+  const ok = await withFreshTasks(list => {
+    const t = list.find(x=>x.id===pendingCompleteId);
+    if(t){ t.status = "Complete"; t.completedDate = todayISO(); t.approvedBy = approvedBy; }
+  });
+  render();
+  if(ok){
+    closeModal("completeOverlay");
+    showToast("Marked complete");
+  } else {
+    showToast("Couldn't save — please try again");
+  }
+}
+
+loadTasks();
+</script>
+</body>
+</html>
