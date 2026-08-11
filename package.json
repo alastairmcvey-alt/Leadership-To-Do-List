@@ -4,6 +4,6 @@
   "private": true,
   "description": "Hornsby BMW leadership team traffic-light to-do list",
   "dependencies": {
-    "@vercel/kv": "^1.0.1"
+    "ioredis": "^5.4.1"
   }
 }
