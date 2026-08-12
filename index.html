@@ -32,6 +32,10 @@
   .tab{padding:8px 16px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;}
   .tab.active{background:var(--panel);color:var(--text);}
   .tab .count{opacity:.7;font-weight:500;}
+  .filter-row{display:flex;align-items:center;gap:8px;margin-bottom:18px;}
+  .filter-row label{font-size:12.5px;font-weight:600;color:var(--muted);margin:0;}
+  .filter-row select{width:auto;min-width:170px;background:var(--panel2);border:1px solid var(--border);
+    color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;}
   .lane-header{display:flex;align-items:center;gap:8px;margin:22px 0 10px;font-size:12.5px;
     font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
   .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
@@ -57,6 +61,7 @@
     background:var(--panel2);color:var(--text);cursor:pointer;font-weight:600;}
   .actions button.primary{background:var(--accent);border-color:var(--accent);}
   .actions button.complete{background:var(--green-bg);border-color:var(--green);color:var(--green-text);}
+  .actions button.danger{background:var(--red-bg);border-color:var(--red);color:var(--red-text);}
   .empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:14px;}
   /* modal */
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;
@@ -99,6 +104,14 @@
     <div class="tab active" data-tab="active" onclick="setTab('active')">Active <span class="count" id="countActive"></span></div>
     <div class="tab" data-tab="history" onclick="setTab('history')">Completed <span class="count" id="countHistory"></span></div>
   </div>
+  <div class="filter-row">
+    <label for="filterSelect">Show</label>
+    <select id="filterSelect" onchange="onFilterChange(this.value)">
+      <option value="all">All tasks</option>
+      <optgroup label="Added by" id="filterAddedGroup"></optgroup>
+      <optgroup label="Assigned to" id="filterAssignedGroup"></optgroup>
+    </select>
+  </div>
   <div id="content" class="loading">Loading tasks…</div>
 </main>
 
@@ -111,6 +124,10 @@
     <textarea id="f-desc" placeholder="Any extra detail"></textarea>
     <label>Your name</label>
     <select id="f-name"></select>
+    <label>Assign to</label>
+    <select id="f-assigned">
+      <option value="" disabled selected>Select a person…</option>
+    </select>
     <label>Urgency</label>
     <select id="f-urgency">
       <option>Low</option><option selected>Medium</option><option>High</option><option>Urgent</option>
@@ -127,6 +144,7 @@
     <h2>Mark as complete</h2>
     <div class="confirm-box">There's no login on this list, so completion runs on trust. Only confirm if this is genuinely finished — the task will move to the Completed tab.</div>
     <label>Confirming as</label>
+
     <select id="c-name"></select>
     <div class="modal-actions">
       <button class="cancel" onclick="closeModal('completeOverlay')">Cancel</button>
@@ -143,14 +161,40 @@ const STORAGE_KEY = "hornsby-leadership-tasks";
 let tasks = [];
 let currentTab = "active";
 let pendingCompleteId = null;
+let currentFilter = { mode: "all", name: null };
 
 function fillNameSelects(){
   ["f-name","c-name"].forEach(id=>{
     const sel = document.getElementById(id);
     sel.innerHTML = TEAM.map(n=>`<option value="${n}">${n}</option>`).join("");
   });
+  const assignedSel = document.getElementById("f-assigned");
+  assignedSel.innerHTML = `<option value="" disabled selected>Select a person…</option>` +
+    TEAM.map(n=>`<option value="${n}">${n}</option>`).join("");
+
+  document.getElementById("filterAddedGroup").innerHTML =
+    TEAM.map(n=>`<option value="addedBy:${n}">${n}</option>`).join("");
+  document.getElementById("filterAssignedGroup").innerHTML =
+    TEAM.map(n=>`<option value="assignedTo:${n}">${n}</option>`).join("");
 }
 fillNameSelects();
+
+function onFilterChange(value){
+  if(value === "all"){
+    currentFilter = { mode: "all", name: null };
+  } else {
+    const [mode, name] = value.split(":");
+    currentFilter = { mode, name };
+  }
+  render();
+}
+
+function matchesFilter(t){
+  if(currentFilter.mode === "all") return true;
+  if(currentFilter.mode === "addedBy") return t.addedBy === currentFilter.name;
+  if(currentFilter.mode === "assignedTo") return t.assignedTo === currentFilter.name;
+  return true;
+}
 
 function showToast(msg){
   const t = document.getElementById("toast");
@@ -233,17 +277,21 @@ function setTab(tab){
 }
 
 function render(){
-  const active = tasks.filter(t=>t.status!=="Complete");
-  const history = tasks.filter(t=>t.status==="Complete");
+  const filtered = tasks.filter(matchesFilter);
+  const active = filtered.filter(t=>t.status!=="Complete");
+  const history = filtered.filter(t=>t.status==="Complete");
   document.getElementById("countActive").textContent = active.length ? `(${active.length})` : "";
   document.getElementById("countHistory").textContent = history.length ? `(${history.length})` : "";
 
   const content = document.getElementById("content");
   content.classList.remove("loading");
+  const filterNote = currentFilter.mode !== "all"
+    ? ` for ${currentFilter.mode === "addedBy" ? "tasks added by" : "tasks assigned to"} ${currentFilter.name}`
+    : "";
 
   if(currentTab === "active"){
     if(active.length === 0){
-      content.innerHTML = `<div class="empty">No active tasks. Tap "+ Add task" to create one.</div>`;
+      content.innerHTML = `<div class="empty">No active tasks${filterNote}.</div>`;
       return;
     }
     const red = active.filter(t=>t.status==="To Start");
@@ -253,7 +301,7 @@ function render(){
       laneHTML("orange","In progress", orange);
   } else {
     if(history.length === 0){
-      content.innerHTML = `<div class="empty">Nothing completed yet.</div>`;
+      content.innerHTML = `<div class="empty">Nothing completed yet${filterNote}.</div>`;
       return;
     }
     const sorted = [...history].sort((a,b)=> new Date(b.completedDate) - new Date(a.completedDate));
@@ -286,11 +334,17 @@ function cardHTML(t,color){
   if(t.status === "To Start"){
     actions = `<div class="actions">
       <button class="primary" style="background:var(--orange);border-color:var(--orange);color:#3a1f00;" onclick="startTask('${t.id}')">Start progress</button>
+      <button class="danger" onclick="deleteTask('${t.id}')">Delete</button>
     </div>`;
   } else if(t.status === "In Progress"){
     actions = `<div class="actions">
       <button onclick="revertTask('${t.id}')">Back to To Start</button>
       <button class="complete" onclick="openCompleteModal('${t.id}')">Mark complete</button>
+      <button class="danger" onclick="deleteTask('${t.id}')">Delete</button>
+    </div>`;
+  } else if(t.status === "Complete"){
+    actions = `<div class="actions">
+      <button class="danger" onclick="deleteTask('${t.id}')">Delete</button>
     </div>`;
   }
 
@@ -302,6 +356,7 @@ function cardHTML(t,color){
     ${t.description ? `<p class="desc">${escapeHTML(t.description)}</p>` : ""}
     <div class="meta">
       <span>Added by <b>${t.addedBy}</b></span>
+      <span>Assigned to <b>${t.assignedTo || "—"}</b></span>
       <span>Start <b>${fmt(t.startDate)}</b></span>
       ${daysInfo}
       ${t.status==="Complete" ? `<span>Confirmed by <b>${t.approvedBy}</b></span>` : ""}
@@ -320,6 +375,7 @@ function openAddModal(){
   document.getElementById("f-title").value = "";
   document.getElementById("f-desc").value = "";
   document.getElementById("f-urgency").value = "Medium";
+  document.getElementById("f-assigned").value = "";
   document.getElementById("addOverlay").style.display = "flex";
 }
 function closeModal(id){ document.getElementById(id).style.display = "none"; }
@@ -347,9 +403,12 @@ async function withFreshTasks(mutate){
 async function submitTask(){
   const title = document.getElementById("f-title").value.trim();
   if(!title){ showToast("Give the task a title first"); return; }
+  const assignedTo = document.getElementById("f-assigned").value;
+  if(!assignedTo){ showToast("Choose who this task is assigned to"); return; }
   const task = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
     title,
+    assignedTo,
     description: document.getElementById("f-desc").value.trim(),
     addedBy: document.getElementById("f-name").value,
     urgency: document.getElementById("f-urgency").value,
@@ -385,6 +444,19 @@ async function revertTask(id){
   });
   render();
   if(!ok) showToast("Couldn't save that change — please try again");
+}
+
+async function deleteTask(id){
+  const t = tasks.find(x=>x.id===id);
+  const label = t ? t.title : "this task";
+  if(!confirm(`Delete "${label}"? This can't be undone.`)) return;
+  const ok = await withFreshTasks(list => {
+    const idx = list.findIndex(x=>x.id===id);
+    if(idx > -1) list.splice(idx, 1);
+  });
+  render();
+  if(ok) showToast("Task deleted");
+  else showToast("Couldn't delete — please try again");
 }
 
 function openCompleteModal(id){
