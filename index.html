@@ -32,10 +32,13 @@
   .tab{padding:8px 16px;border-radius:8px;font-size:13.5px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;}
   .tab.active{background:var(--panel);color:var(--text);}
   .tab .count{opacity:.7;font-weight:500;}
-  .filter-row{display:flex;align-items:center;gap:8px;margin-bottom:18px;}
+  .filter-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
   .filter-row label{font-size:12.5px;font-weight:600;color:var(--muted);margin:0;}
   .filter-row select{width:auto;min-width:170px;background:var(--panel2);border:1px solid var(--border);
     color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;}
+  select[multiple]{min-height:120px;}
+  select[multiple] option{padding:6px 8px;border-radius:5px;}
+  .filter-hint{font-size:11.5px;color:var(--muted);margin:4px 0 16px;}
   .lane-header{display:flex;align-items:center;gap:8px;margin:22px 0 10px;font-size:12.5px;
     font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
   .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
@@ -105,13 +108,15 @@
     <div class="tab" data-tab="history" onclick="setTab('history')">Completed <span class="count" id="countHistory"></span></div>
   </div>
   <div class="filter-row">
-    <label for="filterSelect">Show</label>
-    <select id="filterSelect" onchange="onFilterChange(this.value)">
+    <label for="filterMode">Show</label>
+    <select id="filterMode" onchange="onFilterModeChange(this.value)">
       <option value="all">All tasks</option>
-      <optgroup label="Added by" id="filterAddedGroup"></optgroup>
-      <optgroup label="Assigned to" id="filterAssignedGroup"></optgroup>
+      <option value="addedBy">Added by…</option>
+      <option value="assignedTo">Assigned to…</option>
     </select>
+    <select id="filterPeople" multiple size="4" style="display:none;" onchange="onFilterPeopleChange()"></select>
   </div>
+  <div id="filterHint" class="filter-hint" style="display:none;">Hold Ctrl (Windows) / Cmd (Mac) and click to pick more than one — or on a phone, just tap each name.</div>
   <div id="content" class="loading">Loading tasks…</div>
 </main>
 
@@ -124,11 +129,11 @@
     <textarea id="f-desc" placeholder="Any extra detail"></textarea>
     <label>Your name</label>
     <select id="f-name"></select>
-    <label>Assign to</label>
-    <select id="f-assigned">
-      <option value="" disabled selected>Select a person…</option>
-    </select>
+    <label>Assign to (pick one or more)</label>
+    <select id="f-assigned" multiple size="7"></select>
+    <div class="filter-hint">Hold Ctrl (Windows) / Cmd (Mac) and click to pick more than one — or on a phone, just tap each name.</div>
     <label>Urgency</label>
+
     <select id="f-urgency">
       <option>Low</option><option selected>Medium</option><option>High</option><option>Urgent</option>
     </select>
@@ -161,38 +166,57 @@ const STORAGE_KEY = "hornsby-leadership-tasks";
 let tasks = [];
 let currentTab = "active";
 let pendingCompleteId = null;
-let currentFilter = { mode: "all", name: null };
+let currentFilter = { mode: "all", names: [] };
 
 function fillNameSelects(){
   ["f-name","c-name"].forEach(id=>{
     const sel = document.getElementById(id);
     sel.innerHTML = TEAM.map(n=>`<option value="${n}">${n}</option>`).join("");
   });
-  const assignedSel = document.getElementById("f-assigned");
-  assignedSel.innerHTML = `<option value="" disabled selected>Select a person…</option>` +
+  document.getElementById("f-assigned").innerHTML =
     TEAM.map(n=>`<option value="${n}">${n}</option>`).join("");
-
-  document.getElementById("filterAddedGroup").innerHTML =
-    TEAM.map(n=>`<option value="addedBy:${n}">${n}</option>`).join("");
-  document.getElementById("filterAssignedGroup").innerHTML =
-    TEAM.map(n=>`<option value="assignedTo:${n}">${n}</option>`).join("");
+  document.getElementById("filterPeople").innerHTML =
+    TEAM.map(n=>`<option value="${n}">${n}</option>`).join("");
 }
 fillNameSelects();
 
-function onFilterChange(value){
-  if(value === "all"){
-    currentFilter = { mode: "all", name: null };
+function selectedValues(selectEl){
+  return Array.from(selectEl.selectedOptions).map(o=>o.value);
+}
+
+function onFilterModeChange(mode){
+  const peopleSel = document.getElementById("filterPeople");
+  const hint = document.getElementById("filterHint");
+  if(mode === "all"){
+    peopleSel.style.display = "none";
+    hint.style.display = "none";
+    currentFilter = { mode: "all", names: [] };
+    render();
   } else {
-    const [mode, name] = value.split(":");
-    currentFilter = { mode, name };
+    peopleSel.style.display = "";
+    hint.style.display = "";
+    Array.from(peopleSel.options).forEach(o => o.selected = false);
+    currentFilter = { mode, names: [] };
+    render();
   }
+}
+
+function onFilterPeopleChange(){
+  const names = selectedValues(document.getElementById("filterPeople"));
+  currentFilter = { mode: currentFilter.mode, names };
   render();
 }
 
+// "ANY selected person" logic: a task matches if it has at least one
+// name in common with whatever's currently ticked in the filter.
 function matchesFilter(t){
   if(currentFilter.mode === "all") return true;
-  if(currentFilter.mode === "addedBy") return t.addedBy === currentFilter.name;
-  if(currentFilter.mode === "assignedTo") return t.assignedTo === currentFilter.name;
+  if(currentFilter.names.length === 0) return false;
+  if(currentFilter.mode === "addedBy") return currentFilter.names.includes(t.addedBy);
+  if(currentFilter.mode === "assignedTo"){
+    const list = Array.isArray(t.assignedTo) ? t.assignedTo : (t.assignedTo ? [t.assignedTo] : []);
+    return list.some(n => currentFilter.names.includes(n));
+  }
   return true;
 }
 
@@ -285,9 +309,9 @@ function render(){
 
   const content = document.getElementById("content");
   content.classList.remove("loading");
-  const filterNote = currentFilter.mode !== "all"
-    ? ` for ${currentFilter.mode === "addedBy" ? "tasks added by" : "tasks assigned to"} ${currentFilter.name}`
-    : "";
+  const filterNote = (currentFilter.mode !== "all" && currentFilter.names.length > 0)
+    ? ` for ${currentFilter.mode === "addedBy" ? "tasks added by" : "tasks assigned to"} ${currentFilter.names.join(" or ")}`
+    : (currentFilter.mode !== "all" ? " — pick at least one name above" : "");
 
   if(currentTab === "active"){
     if(active.length === 0){
@@ -356,7 +380,7 @@ function cardHTML(t,color){
     ${t.description ? `<p class="desc">${escapeHTML(t.description)}</p>` : ""}
     <div class="meta">
       <span>Added by <b>${t.addedBy}</b></span>
-      <span>Assigned to <b>${t.assignedTo || "—"}</b></span>
+      <span>Assigned to <b>${assignedList(t).length ? assignedList(t).join(", ") : "—"}</b></span>
       <span>Start <b>${fmt(t.startDate)}</b></span>
       ${daysInfo}
       ${t.status==="Complete" ? `<span>Confirmed by <b>${t.approvedBy}</b></span>` : ""}
@@ -371,11 +395,19 @@ function escapeHTML(s){
   return d.innerHTML;
 }
 
+// Older tasks (saved before multi-assign existed) may still have
+// assignedTo as a single name string rather than an array — handle both.
+function assignedList(t){
+  if(Array.isArray(t.assignedTo)) return t.assignedTo;
+  if(t.assignedTo) return [t.assignedTo];
+  return [];
+}
+
 function openAddModal(){
   document.getElementById("f-title").value = "";
   document.getElementById("f-desc").value = "";
   document.getElementById("f-urgency").value = "Medium";
-  document.getElementById("f-assigned").value = "";
+  Array.from(document.getElementById("f-assigned").options).forEach(o => o.selected = false);
   document.getElementById("addOverlay").style.display = "flex";
 }
 function closeModal(id){ document.getElementById(id).style.display = "none"; }
@@ -403,8 +435,8 @@ async function withFreshTasks(mutate){
 async function submitTask(){
   const title = document.getElementById("f-title").value.trim();
   if(!title){ showToast("Give the task a title first"); return; }
-  const assignedTo = document.getElementById("f-assigned").value;
-  if(!assignedTo){ showToast("Choose who this task is assigned to"); return; }
+  const assignedTo = selectedValues(document.getElementById("f-assigned"));
+  if(assignedTo.length === 0){ showToast("Choose at least one person to assign this to"); return; }
   const task = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
     title,
