@@ -19,8 +19,20 @@ module.exports = async function handler(req, res) {
 
     if (req.method === 'GET') {
       const raw = await redis.get(KEY);
-      const tasks = raw ? JSON.parse(raw) : [];
-      res.status(200).json({ tasks });
+      let data = { tasks: [], team: [] };
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          // Old format from before the people list existed: a bare array of tasks.
+          data = { tasks: parsed, team: [] };
+        } else {
+          data = {
+            tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+            team: Array.isArray(parsed.team) ? parsed.team : []
+          };
+        }
+      }
+      res.status(200).json(data);
       return;
     }
 
@@ -30,7 +42,8 @@ module.exports = async function handler(req, res) {
         res.status(400).json({ error: 'Request must include a "tasks" array.' });
         return;
       }
-      await redis.set(KEY, JSON.stringify(body.tasks));
+      const team = Array.isArray(body.team) ? body.team : [];
+      await redis.set(KEY, JSON.stringify({ tasks: body.tasks, team }));
       res.status(200).json({ ok: true });
       return;
     }
