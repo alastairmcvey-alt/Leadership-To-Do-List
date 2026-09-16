@@ -104,6 +104,7 @@
   </div>
   <div style="display:flex;gap:8px;">
     <button class="btn btn-ghost" onclick="loadTasks(true)">Refresh</button>
+    <button class="btn btn-ghost" onclick="openPeopleModal()">People</button>
     <button class="btn btn-primary" onclick="openAddModal()">+ Add task</button>
   </div>
 </header>
@@ -163,10 +164,25 @@
   </div>
 </div>
 
+<div class="overlay" id="peopleOverlay" style="display:none;">
+  <div class="modal">
+    <h2>Manage people</h2>
+    <div class="confirm-box">Anyone on this list can be picked as "Your name", "Assign to", or in the filters. Removing someone doesn't touch tasks already saved against their name — it just takes them out of the picker for new ones.</div>
+    <div id="peopleListContainer" class="checkbox-list" style="max-height:240px;overflow-y:auto;"></div>
+    <label>Add a new person</label>
+    <input type="text" id="newPersonName" placeholder="Full name">
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal('peopleOverlay')">Close</button>
+      <button class="btn-primary" style="background:var(--accent);color:#fff;" onclick="addPerson()">Add person</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
-const TEAM = ["Alastair McVey","Matt Gale","Nelson Amath","Mohammad Dubdub","Jack Duncum","Clyde Nolan","Jono Power"];
+const DEFAULT_TEAM = ["Alastair McVey","Matt Gale","Nelson Amath","Mohammad Dubdub","Jack Duncum","Clyde Nolan","Jono Power","Amelia","Alyssa","Corinne"];
+let TEAM = [];
 const STORAGE_KEY = "hornsby-leadership-tasks";
 let tasks = [];
 let currentTab = "active";
@@ -186,12 +202,13 @@ function checkboxItemsHTML(idPrefix, onChangeAttr){
 function fillNameSelects(){
   ["f-name","c-name"].forEach(id=>{
     const sel = document.getElementById(id);
+    const prevValue = sel.value;
     sel.innerHTML = TEAM.map(n=>`<option value="${n}">${n}</option>`).join("");
+    if(TEAM.includes(prevValue)) sel.value = prevValue;
   });
   document.getElementById("f-assigned-list").innerHTML = checkboxItemsHTML("assign", null);
   document.getElementById("filterPeopleList").innerHTML = checkboxItemsHTML("filter", "onFilterPeopleChange()");
 }
-fillNameSelects();
 
 function checkedValues(containerId){
   return Array.from(document.querySelectorAll("#" + containerId + " input:checked")).map(cb => cb.value);
@@ -244,8 +261,9 @@ function setStatus(msg, isError){
 }
 
 // The storage layer talks to our own /api/tasks endpoint (backed by
-// Vercel KV), not Claude's artifact storage — this runs as a normal
-// website, so no sign-in of any kind is required.
+// Redis) — this runs as a normal website, so no sign-in of any kind
+// is required. It carries both the task list and the people list
+// together, since both are "shared team data".
 async function loadTasks(manual, attempt){
   attempt = attempt || 1;
   setStatus(manual ? "Refreshing…" : "Connecting…", false);
@@ -257,6 +275,15 @@ async function loadTasks(manual, attempt){
     }
     const data = await res.json();
     tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    if(Array.isArray(data.team) && data.team.length > 0){
+      TEAM = data.team;
+    } else {
+      // First time this has ever loaded — seed the shared people list
+      // with the current default roster so everyone starts in sync.
+      TEAM = DEFAULT_TEAM.slice();
+      saveAll();
+    }
+    fillNameSelects();
     setStatus("Shared with the whole leadership team — tap Refresh to see others' changes", false);
     render();
     if(manual) showToast("Refreshed — " + tasks.length + " task" + (tasks.length===1?"":"s") + " loaded");
@@ -268,15 +295,35 @@ async function loadTasks(manual, attempt){
     const hint = (e.message && e.message.includes("KV")) ? " — storage isn't connected yet, ask Alastair to check Vercel" : "";
     setStatus("Couldn't connect to shared storage" + hint, true);
     if(manual) showToast("Refresh failed — check your connection");
+    if(TEAM.length === 0){ TEAM = DEFAULT_TEAM.slice(); fillNameSelects(); }
   }
 }
 
-async function saveTasksRaw(list){
+// Fetches the current shared state fresh from the server. Used before
+// every save so one device can't accidentally overwrite a change a
+// teammate made moments earlier — for tasks or for the people list.
+async function fetchFreshState(){
+  try{
+    const res = await fetch("/api/tasks", {cache:"no-store"});
+    if(res.ok){
+      const data = await res.json();
+      return {
+        tasks: Array.isArray(data.tasks) ? data.tasks : [],
+        team: (Array.isArray(data.team) && data.team.length > 0) ? data.team : TEAM
+      };
+    }
+  }catch(e){
+    // couldn't reach storage at all — fall back to what we already have locally
+  }
+  return { tasks, team: TEAM };
+}
+
+async function saveAll(){
   try{
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({tasks: list})
+      body: JSON.stringify({tasks, team: TEAM})
     });
     if(!res.ok){
       const body = await res.json().catch(()=>({}));
@@ -427,19 +474,73 @@ function closeModal(id){ document.getElementById(id).style.display = "none"; }
 // or updated moments earlier. Falls back to the in-memory list only
 // if the fresh fetch itself fails.
 async function withFreshTasks(mutate){
-  let freshTasks = tasks;
-  try{
-    const res = await fetch("/api/tasks", {cache:"no-store"});
-    if(res.ok){
-      const data = await res.json();
-      freshTasks = Array.isArray(data.tasks) ? data.tasks : [];
-    }
-  }catch(e){
-    // couldn't reach storage at all — fall back to what we already have locally
+  const fresh = await fetchFreshState();
+  mutate(fresh.tasks);
+  tasks = fresh.tasks;
+  TEAM = fresh.team;
+  return await saveAll();
+}
+
+// Same idea, but for changes to the shared people list (Manage people).
+async function withFreshTeam(mutate){
+  const fresh = await fetchFreshState();
+  mutate(fresh.team);
+  tasks = fresh.tasks;
+  TEAM = fresh.team;
+  return await saveAll();
+}
+
+function renderPeopleList(){
+  const c = document.getElementById("peopleListContainer");
+  if(TEAM.length === 0){
+    c.innerHTML = `<div class="empty" style="padding:16px;">No one on the list yet.</div>`;
+    return;
   }
-  mutate(freshTasks);
-  tasks = freshTasks;
-  return await saveTasksRaw(tasks);
+  c.innerHTML = TEAM.map(n => `
+    <div class="checkbox-item" style="justify-content:space-between;">
+      <span>${escapeHTML(n)}</span>
+      <button onclick="removePerson('${n.replace(/'/g, "\\'")}')"
+        style="background:none;border:none;color:var(--red-text);cursor:pointer;font-size:12px;font-weight:700;padding:4px 6px;">Remove</button>
+    </div>
+  `).join("");
+}
+
+function openPeopleModal(){
+  renderPeopleList();
+  document.getElementById("newPersonName").value = "";
+  document.getElementById("peopleOverlay").style.display = "flex";
+}
+
+async function addPerson(){
+  const input = document.getElementById("newPersonName");
+  const name = input.value.trim();
+  if(!name){ showToast("Type a name first"); return; }
+  if(TEAM.includes(name)){ showToast("That person is already on the list"); return; }
+  const ok = await withFreshTeam(list => list.push(name));
+  if(ok){
+    input.value = "";
+    renderPeopleList();
+    fillNameSelects();
+    showToast("Person added");
+  } else {
+    showToast("Couldn't save — check your connection and try again");
+  }
+}
+
+async function removePerson(name){
+  if(!confirm(`Remove ${name} from the list? Tasks already saved against their name are unaffected — they just won't be pickable for new ones.`)) return;
+  const ok = await withFreshTeam(list => {
+    const idx = list.indexOf(name);
+    if(idx > -1) list.splice(idx, 1);
+  });
+  if(ok){
+    renderPeopleList();
+    fillNameSelects();
+    render();
+    showToast("Person removed");
+  } else {
+    showToast("Couldn't save — check your connection and try again");
+  }
 }
 
 async function submitTask(){
