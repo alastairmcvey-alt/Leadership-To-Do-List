@@ -260,10 +260,12 @@ function setStatus(msg, isError){
   el.style.color = isError ? "var(--red-text)" : "var(--muted)";
 }
 
-// The storage layer talks to our own /api/tasks endpoint (backed by
-// Redis) — this runs as a normal website, so no sign-in of any kind
-// is required. It carries both the task list and the people list
-// together, since both are "shared team data".
+// The storage layer talks to small, atomic endpoints on our own server
+// (/api/tasks/add, /update, /delete, /api/team/add, /remove) — each one
+// applies its change directly inside the database in one step, so two
+// actions happening close together (two tabs, two people) can never
+// overwrite each other. GET /api/tasks is only for loading/refreshing
+// the full picture, never for building a change to save back.
 async function loadTasks(manual, attempt){
   attempt = attempt || 1;
   setStatus(manual ? "Refreshing…" : "Connecting…", false);
@@ -274,16 +276,7 @@ async function loadTasks(manual, attempt){
       throw new Error(body.error || ("HTTP " + res.status));
     }
     const data = await res.json();
-    tasks = Array.isArray(data.tasks) ? data.tasks : [];
-    if(Array.isArray(data.team) && data.team.length > 0){
-      TEAM = data.team;
-    } else {
-      // First time this has ever loaded — seed the shared people list
-      // with the current default roster so everyone starts in sync.
-      TEAM = DEFAULT_TEAM.slice();
-      saveAll();
-    }
-    fillNameSelects();
+    applyServerState(data);
     setStatus("Shared with the whole leadership team — tap Refresh to see others' changes", false);
     render();
     if(manual) showToast("Refreshed — " + tasks.length + " task" + (tasks.length===1?"":"s") + " loaded");
@@ -292,45 +285,37 @@ async function loadTasks(manual, attempt){
       setTimeout(()=>loadTasks(manual, attempt+1), 600);
       return;
     }
-    const hint = (e.message && e.message.includes("KV")) ? " — storage isn't connected yet, ask Alastair to check Vercel" : "";
-    setStatus("Couldn't connect to shared storage" + hint, true);
+    setStatus("Couldn't connect to shared storage", true);
     if(manual) showToast("Refresh failed — check your connection");
     if(TEAM.length === 0){ TEAM = DEFAULT_TEAM.slice(); fillNameSelects(); }
   }
 }
 
-// Fetches the current shared state fresh from the server. Used before
-// every save so one device can't accidentally overwrite a change a
-// teammate made moments earlier — for tasks or for the people list.
-async function fetchFreshState(){
-  try{
-    const res = await fetch("/api/tasks", {cache:"no-store"});
-    if(res.ok){
-      const data = await res.json();
-      return {
-        tasks: Array.isArray(data.tasks) ? data.tasks : [],
-        team: (Array.isArray(data.team) && data.team.length > 0) ? data.team : TEAM
-      };
-    }
-  }catch(e){
-    // couldn't reach storage at all — fall back to what we already have locally
-  }
-  return { tasks, team: TEAM };
+// Every mutation endpoint returns the resulting full state, so the UI
+// can just adopt it directly rather than guessing what changed.
+function applyServerState(data){
+  tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  TEAM = (Array.isArray(data.team) && data.team.length > 0) ? data.team : TEAM;
+  fillNameSelects();
 }
 
-async function saveAll(){
+// Posts to one of the atomic action endpoints and adopts whatever
+// state comes back. Returns true/false for success, and shows a clear
+// message either way.
+async function callAction(path, payload){
   try{
-    const res = await fetch("/api/tasks", {
+    const res = await fetch(path, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({tasks, team: TEAM})
+      body: JSON.stringify(payload)
     });
+    const body = await res.json().catch(()=>({}));
     if(!res.ok){
-      const body = await res.json().catch(()=>({}));
       setStatus("Save failed — your change may not be visible to the team. Try again.", true);
       showToast(body.error || "Save failed — please try again");
       return false;
     }
+    applyServerState(body);
     setStatus("Shared with the whole leadership team — tap Refresh to see others' changes", false);
     return true;
   }catch(e){
@@ -470,26 +455,6 @@ function openAddModal(){
 function closeModal(id){ document.getElementById(id).style.display = "none"; }
 
 // Pulls the latest saved list first, applies the change, then saves —
-// so this device can't accidentally overwrite a task a teammate added
-// or updated moments earlier. Falls back to the in-memory list only
-// if the fresh fetch itself fails.
-async function withFreshTasks(mutate){
-  const fresh = await fetchFreshState();
-  mutate(fresh.tasks);
-  tasks = fresh.tasks;
-  TEAM = fresh.team;
-  return await saveAll();
-}
-
-// Same idea, but for changes to the shared people list (Manage people).
-async function withFreshTeam(mutate){
-  const fresh = await fetchFreshState();
-  mutate(fresh.team);
-  tasks = fresh.tasks;
-  TEAM = fresh.team;
-  return await saveAll();
-}
-
 function renderPeopleList(){
   const c = document.getElementById("peopleListContainer");
   if(TEAM.length === 0){
@@ -516,11 +481,10 @@ async function addPerson(){
   const name = input.value.trim();
   if(!name){ showToast("Type a name first"); return; }
   if(TEAM.includes(name)){ showToast("That person is already on the list"); return; }
-  const ok = await withFreshTeam(list => list.push(name));
+  const ok = await callAction("/api/team/add", { name });
   if(ok){
     input.value = "";
     renderPeopleList();
-    fillNameSelects();
     showToast("Person added");
   } else {
     showToast("Couldn't save — check your connection and try again");
@@ -529,13 +493,9 @@ async function addPerson(){
 
 async function removePerson(name){
   if(!confirm(`Remove ${name} from the list? Tasks already saved against their name are unaffected — they just won't be pickable for new ones.`)) return;
-  const ok = await withFreshTeam(list => {
-    const idx = list.indexOf(name);
-    if(idx > -1) list.splice(idx, 1);
-  });
+  const ok = await callAction("/api/team/remove", { name });
   if(ok){
     renderPeopleList();
-    fillNameSelects();
     render();
     showToast("Person removed");
   } else {
@@ -561,7 +521,7 @@ async function submitTask(){
     completedDate: null,
     approvedBy: null
   };
-  const ok = await withFreshTasks(list => list.unshift(task));
+  const ok = await callAction("/api/tasks/add", { task });
   render();
   if(ok){
     closeModal("addOverlay");
@@ -572,19 +532,13 @@ async function submitTask(){
 }
 
 async function startTask(id){
-  const ok = await withFreshTasks(list => {
-    const t = list.find(x=>x.id===id);
-    if(t){ t.status = "In Progress"; t.progressStartDate = todayISO(); }
-  });
+  const ok = await callAction("/api/tasks/update", { id, patch: { status: "In Progress", progressStartDate: todayISO() } });
   render();
   if(!ok) showToast("Couldn't save that change — please try again");
 }
 
 async function revertTask(id){
-  const ok = await withFreshTasks(list => {
-    const t = list.find(x=>x.id===id);
-    if(t){ t.status = "To Start"; t.progressStartDate = null; }
-  });
+  const ok = await callAction("/api/tasks/update", { id, patch: { status: "To Start", progressStartDate: null } });
   render();
   if(!ok) showToast("Couldn't save that change — please try again");
 }
@@ -593,10 +547,7 @@ async function deleteTask(id){
   const t = tasks.find(x=>x.id===id);
   const label = t ? t.title : "this task";
   if(!confirm(`Delete "${label}"? This can't be undone.`)) return;
-  const ok = await withFreshTasks(list => {
-    const idx = list.findIndex(x=>x.id===id);
-    if(idx > -1) list.splice(idx, 1);
-  });
+  const ok = await callAction("/api/tasks/delete", { id });
   render();
   if(ok) showToast("Task deleted");
   else showToast("Couldn't delete — please try again");
@@ -609,9 +560,9 @@ function openCompleteModal(id){
 
 async function confirmComplete(){
   const approvedBy = document.getElementById("c-name").value;
-  const ok = await withFreshTasks(list => {
-    const t = list.find(x=>x.id===pendingCompleteId);
-    if(t){ t.status = "Complete"; t.completedDate = todayISO(); t.approvedBy = approvedBy; }
+  const ok = await callAction("/api/tasks/update", {
+    id: pendingCompleteId,
+    patch: { status: "Complete", completedDate: todayISO(), approvedBy }
   });
   render();
   if(ok){
