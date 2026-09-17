@@ -164,6 +164,28 @@
   </div>
 </div>
 
+<div class="overlay" id="editOverlay" style="display:none;">
+  <div class="modal">
+    <h2>Edit task</h2>
+    <label>Task</label>
+    <input type="text" id="e-title">
+    <label>Description / notes (optional)</label>
+    <textarea id="e-desc"></textarea>
+    <label>Added by</label>
+    <select id="e-addedBy"></select>
+    <label>Assign to (tick one or more)</label>
+    <div id="e-assigned-list" class="checkbox-list"></div>
+    <label>Urgency</label>
+    <select id="e-urgency">
+      <option>Low</option><option>Medium</option><option>High</option><option>Urgent</option>
+    </select>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeModal('editOverlay')">Cancel</button>
+      <button class="btn-primary" style="background:var(--accent);color:#fff;" onclick="saveEdit()">Save changes</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="peopleOverlay" style="display:none;">
   <div class="modal">
     <h2>Manage people</h2>
@@ -187,6 +209,7 @@ const STORAGE_KEY = "hornsby-leadership-tasks";
 let tasks = [];
 let currentTab = "active";
 let pendingCompleteId = null;
+let pendingEditId = null;
 let currentFilter = { mode: "all", names: [] };
 
 function checkboxItemsHTML(idPrefix, onChangeAttr){
@@ -200,13 +223,14 @@ function checkboxItemsHTML(idPrefix, onChangeAttr){
 }
 
 function fillNameSelects(){
-  ["f-name","c-name"].forEach(id=>{
+  ["f-name","c-name","e-addedBy"].forEach(id=>{
     const sel = document.getElementById(id);
     const prevValue = sel.value;
     sel.innerHTML = TEAM.map(n=>`<option value="${n}">${n}</option>`).join("");
     if(TEAM.includes(prevValue)) sel.value = prevValue;
   });
   document.getElementById("f-assigned-list").innerHTML = checkboxItemsHTML("assign", null);
+  document.getElementById("e-assigned-list").innerHTML = checkboxItemsHTML("edit", null);
   document.getElementById("filterPeopleList").innerHTML = checkboxItemsHTML("filter", "onFilterPeopleChange()");
 }
 
@@ -425,19 +449,23 @@ function cardHTML(t,color){
   }
 
   let actions = "";
+  const editBtn = `<button onclick="openEditModal('${t.id}')">Edit</button>`;
   if(t.status === "To Start"){
     actions = `<div class="actions">
+      ${editBtn}
       <button class="primary" style="background:var(--orange);border-color:var(--orange);color:#3a1f00;" onclick="startTask('${t.id}')">Start progress</button>
       <button class="danger" onclick="deleteTask('${t.id}')">Delete</button>
     </div>`;
   } else if(t.status === "In Progress"){
     actions = `<div class="actions">
+      ${editBtn}
       <button onclick="revertTask('${t.id}')">Back to To Start</button>
       <button class="complete" onclick="openCompleteModal('${t.id}')">Mark complete</button>
       <button class="danger" onclick="deleteTask('${t.id}')">Delete</button>
     </div>`;
   } else if(t.status === "Complete"){
     actions = `<div class="actions">
+      ${editBtn}
       <button class="danger" onclick="deleteTask('${t.id}')">Delete</button>
     </div>`;
   }
@@ -596,6 +624,44 @@ async function confirmComplete(){
   if(ok){
     closeModal("completeOverlay");
     showToast("Marked complete");
+  } else {
+    showToast("Couldn't save — please try again");
+  }
+}
+
+function openEditModal(id){
+  const t = tasks.find(x=>x.id===id);
+  if(!t) return;
+  pendingEditId = id;
+  document.getElementById("e-title").value = t.title || "";
+  document.getElementById("e-desc").value = t.description || "";
+  const addedBySel = document.getElementById("e-addedBy");
+  if(TEAM.includes(t.addedBy)) addedBySel.value = t.addedBy;
+  document.getElementById("e-urgency").value = t.urgency || "Medium";
+  const currentlyAssigned = assignedList(t);
+  Array.from(document.querySelectorAll("#e-assigned-list input")).forEach(cb => {
+    cb.checked = currentlyAssigned.includes(cb.value);
+  });
+  document.getElementById("editOverlay").style.display = "flex";
+}
+
+async function saveEdit(){
+  const title = document.getElementById("e-title").value.trim();
+  if(!title){ showToast("Give the task a title first"); return; }
+  const assignedTo = checkedValues("e-assigned-list");
+  if(assignedTo.length === 0){ showToast("Choose at least one person to assign this to"); return; }
+  const patch = {
+    title,
+    description: document.getElementById("e-desc").value.trim(),
+    addedBy: document.getElementById("e-addedBy").value,
+    assignedTo,
+    urgency: document.getElementById("e-urgency").value
+  };
+  const ok = await callAction("/api/tasks/update", { id: pendingEditId, patch });
+  render();
+  if(ok){
+    closeModal("editOverlay");
+    showToast("Task updated");
   } else {
     showToast("Couldn't save — please try again");
   }
