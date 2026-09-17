@@ -277,6 +277,12 @@ async function loadTasks(manual, attempt){
     }
     const data = await res.json();
     applyServerState(data);
+    if(TEAM.length === 0){
+      // Nobody's on the list yet (fresh database, or it somehow got
+      // cleared) — seed it via the safe, one-name-at-a-time endpoint
+      // rather than ever overwriting the whole list in one go.
+      await seedDefaultTeam();
+    }
     setStatus("Shared with the whole leadership team — tap Refresh to see others' changes", false);
     render();
     if(manual) showToast("Refreshed — " + tasks.length + " task" + (tasks.length===1?"":"s") + " loaded");
@@ -288,6 +294,28 @@ async function loadTasks(manual, attempt){
     setStatus("Couldn't connect to shared storage", true);
     if(manual) showToast("Refresh failed — check your connection");
     if(TEAM.length === 0){ TEAM = DEFAULT_TEAM.slice(); fillNameSelects(); }
+  }
+}
+
+async function seedDefaultTeam(){
+  for(const name of DEFAULT_TEAM){
+    try{
+      const res = await fetch("/api/team/add", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ name })
+      });
+      if(res.ok){
+        const body = await res.json();
+        applyServerState(body);
+      }
+    }catch(e){
+      // if the network drops mid-seed, just fall back to the local
+      // defaults so the picker still works this session
+      TEAM = DEFAULT_TEAM.slice();
+      fillNameSelects();
+      break;
+    }
   }
 }
 
